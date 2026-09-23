@@ -45,12 +45,20 @@
   button:not(:disabled):active{background:var(--amber-d);}
   #status{margin-top:18px;}
   .row{
-    display:flex; align-items:center; gap:8px; padding:9px 10px; border-radius:8px;
+    padding:9px 10px; border-radius:8px;
     font-size:13px; margin-bottom:6px; background:var(--panel2);
   }
+  .row-label{display:flex; justify-content:space-between; gap:8px;}
   .row.ok{background:var(--teal-l); color:var(--teal);}
   .row.err{background:var(--red-l); color:var(--red);}
   .row.busy{background:var(--amber-l); color:var(--amber-d);}
+  .bar-track{
+    margin-top:6px; height:6px; border-radius:3px; overflow:hidden;
+    background:rgba(0,0,0,0.08);
+  }
+  .bar-fill{height:100%; width:0%; background:var(--amber); transition:width .12s linear;}
+  .row.ok .bar-fill{background:var(--teal);}
+  .row.err .bar-fill{background:var(--red);}
   #tokenBox{display:none; margin-top:16px; padding:12px; background:var(--red-l);
     border-radius:8px; font-size:12.5px; color:var(--red); line-height:1.6;}
 </style>
@@ -75,7 +83,7 @@
 
   <label>卡片 PDF(卡片工具匯出的)</label>
   <div class="file-row"><input type="file" id="pdfFile" accept=".pdf"></div>
-  <p class="hint">三個至少選一個上傳就好。單一檔案請控制在 25 MB 以下,上傳完可以直接關掉這個頁面。</p>
+  <p class="hint">三個至少選一個上傳就好。單一檔案請控制在 25 MB 以下,上傳中請不要關掉這個頁面。</p>
 
   <button id="submitBtn" onclick="uploadAll()">上傳</button>
 
@@ -119,42 +127,76 @@ function toBase64(file) {
   });
 }
 
-function addRow(text, cls) {
+// 每個檔案一個進度條:.row-label 放檔名+百分比,.bar-fill 的寬度就是進度
+function addRow(label) {
   const div = document.createElement("div");
-  div.className = "row " + cls;
-  div.textContent = text;
+  div.className = "row busy";
+  div.innerHTML =
+    '<div class="row-label"><span class="row-name"></span><span class="row-pct">0%</span></div>' +
+    '<div class="bar-track"><div class="bar-fill"></div></div>';
+  div.querySelector(".row-name").textContent = label;
   document.getElementById("status").appendChild(div);
   return div;
 }
 
-async function putFile(token, path, base64Content, message) {
-  const url = `https://api.github.com/repos/${OWNER}/${REPO}/contents/${path.split("/").map(encodeURIComponent).join("/")}`;
+function setProgress(row, frac) {
+  const pct = Math.max(0, Math.min(100, Math.round(frac * 100)));
+  row.querySelector(".bar-fill").style.width = pct + "%";
+  row.querySelector(".row-pct").textContent = pct + "%";
+}
+
+function setDone(row, label, ok) {
+  row.className = "row " + (ok ? "ok" : "err");
+  row.querySelector(".row-name").textContent = label;
+  row.querySelector(".row-pct").textContent = ok ? "✓" : "✗";
+  row.querySelector(".bar-fill").style.width = "100%";
+}
+
+async function getSha(token, url) {
   const headers = {
     "Authorization": "token " + token,
     "Accept": "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",
   };
+  const res = await fetch(url + `?ref=${BRANCH}`, { headers });
+  if (res.ok) return (await res.json()).sha;
+  return undefined;
+}
 
-  // 先查有沒有同名舊檔(重傳/覆蓋用),查不到就當新檔案處理
-  let sha;
-  const getRes = await fetch(url + `?ref=${BRANCH}`, { headers });
-  if (getRes.ok) {
-    sha = (await getRes.json()).sha;
-  }
+// 用 XMLHttpRequest 而不是 fetch,因為只有 XHR 能拿到即時上傳進度(onprogress)
+function putFileWithProgress(token, url, body, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", url);
+    xhr.setRequestHeader("Authorization", "token " + token);
+    xhr.setRequestHeader("Accept", "application/vnd.github+json");
+    xhr.setRequestHeader("X-GitHub-Api-Version", "2022-11-28");
+    xhr.setRequestHeader("Content-Type", "application/json");
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(e.loaded / e.total);
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        onProgress(1);
+        resolve();
+      } else {
+        let msg = `HTTP ${xhr.status}`;
+        try { msg = JSON.parse(xhr.responseText).message || msg; } catch (e) {}
+        reject(new Error(msg));
+      }
+    };
+    xhr.onerror = () => reject(new Error("網路連線失敗"));
+    xhr.send(JSON.stringify(body));
+  });
+}
 
+async function putFile(token, path, base64Content, message, onProgress) {
+  const url = `https://api.github.com/repos/${OWNER}/${REPO}/contents/${path.split("/").map(encodeURIComponent).join("/")}`;
+  // 先查有沒有同名舊檔(重傳/覆蓋用),查不到就當新檔案處理;這步很小,不用顯示進度
+  const sha = await getSha(token, url);
   const body = { message, content: base64Content, branch: BRANCH };
   if (sha) body.sha = sha;
-
-  const putRes = await fetch(url, {
-    method: "PUT",
-    headers: { ...headers, "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-
-  if (!putRes.ok) {
-    const err = await putRes.json().catch(() => ({}));
-    throw new Error(err.message || `HTTP ${putRes.status}`);
-  }
+  await putFileWithProgress(token, url, body, onProgress);
 }
 
 async function uploadAll() {
@@ -178,8 +220,12 @@ async function uploadAll() {
   const img = document.getElementById("imgFile").files[0];
   const pdf = document.getElementById("pdfFile").files[0];
 
-  if (!id || !name) { addRow("請填工號跟姓名", "err"); return; }
-  if (!stl && !img && !pdf) { addRow("請至少選一個檔案(STL / 2D 圖 / 卡片 PDF)", "err"); return; }
+  if (!id || !name) { const r = addRow("請填工號跟姓名"); setDone(r, "請填工號跟姓名", false); return; }
+  if (!stl && !img && !pdf) {
+    const r = addRow("請至少選一個檔案");
+    setDone(r, "請至少選一個檔案(STL / 2D 圖 / 卡片 PDF)", false);
+    return;
+  }
 
   btn.disabled = true;
   btn.textContent = "上傳中…";
@@ -195,15 +241,14 @@ async function uploadAll() {
 
   let allOk = true;
   for (const job of jobs) {
-    const row = addRow(`上傳 ${job.name} 中…`, "busy");
+    const row = addRow(job.name);
     try {
       const b64 = await toBase64(job.file);
-      await putFile(token, `${folder}/${job.name}`, b64, `上傳 ${job.name}`);
-      row.textContent = `✓ ${job.name} 上傳成功`;
-      row.className = "row ok";
+      await putFile(token, `${folder}/${job.name}`, b64, `上傳 ${job.name}`,
+        (frac) => setProgress(row, frac));
+      setDone(row, `${job.name} 上傳成功`, true);
     } catch (e) {
-      row.textContent = `✗ ${job.name} 失敗:${e.message}`;
-      row.className = "row err";
+      setDone(row, `${job.name} 失敗:${e.message}`, false);
       allOk = false;
     }
   }
