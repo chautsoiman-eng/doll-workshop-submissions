@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>2D 到 3D 公仔製作 — 檔案上傳</title>
+<style>
+  :root{
+    --paper:#FFFFFF; --panel:#F6F3ED; --panel2:#ECE7DE;
+    --ink:#1B1E23; --muted:#737983;
+    --amber:#D9821A; --amber-d:#A9620F; --amber-l:#FAEEDC;
+    --teal:#0E848A; --teal-l:#DFEFEF;
+    --red:#C0432E; --red-l:#FAE7E3;
+    --line:#E3DED4;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:"Microsoft JhengHei","PingFang TC","Noto Sans TC",sans-serif;
+    display:flex; justify-content:center; padding:32px 16px;
+  }
+  .card{
+    width:100%; max-width:480px; background:var(--panel);
+    border-radius:16px; padding:28px 24px; border:1px solid var(--line);
+  }
+  h1{font-size:20px; margin:0 0 4px;}
+  .sub{color:var(--muted); font-size:13px; margin:0 0 20px; line-height:1.6;}
+  label{display:block; font-size:13px; font-weight:bold; margin:16px 0 6px;}
+  input[type=text], input[type=password]{
+    width:100%; padding:10px 12px; border-radius:8px; border:1px solid var(--line);
+    background:var(--paper); font-size:15px; color:var(--ink);
+  }
+  .file-row{
+    display:flex; align-items:center; gap:10px; background:var(--paper);
+    border:1px dashed var(--line); border-radius:8px; padding:10px 12px;
+  }
+  .file-row input[type=file]{flex:1; font-size:13px;}
+  .hint{color:var(--muted); font-size:12px; margin-top:4px;}
+  button{
+    width:100%; margin-top:22px; padding:13px; border:none; border-radius:10px;
+    background:var(--amber); color:#fff; font-size:16px; font-weight:bold;
+    cursor:pointer;
+  }
+  button:disabled{background:var(--line); color:var(--muted); cursor:not-allowed;}
+  button:not(:disabled):active{background:var(--amber-d);}
+  #status{margin-top:18px;}
+  .row{
+    display:flex; align-items:center; gap:8px; padding:9px 10px; border-radius:8px;
+    font-size:13px; margin-bottom:6px; background:var(--panel2);
+  }
+  .row.ok{background:var(--teal-l); color:var(--teal);}
+  .row.err{background:var(--red-l); color:var(--red);}
+  .row.busy{background:var(--amber-l); color:var(--amber-d);}
+  #tokenBox{display:none; margin-top:16px; padding:12px; background:var(--red-l);
+    border-radius:8px; font-size:12.5px; color:var(--red); line-height:1.6;}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>2D 到 3D 公仔製作</h1>
+  <p class="sub">上傳你的 STL 檔案跟 2D 參考圖,選好檔案按「上傳」就好,不用登入、不用申請帳號。</p>
+
+  <label>工號</label>
+  <input type="text" id="empId" placeholder="例如 A1234" autocomplete="off">
+
+  <label>姓名</label>
+  <input type="text" id="empName" placeholder="例如 陳小美" autocomplete="off">
+
+  <label>STL 檔案(必填)</label>
+  <div class="file-row"><input type="file" id="stlFile" accept=".stl"></div>
+
+  <label>2D 參考圖(建議附上)</label>
+  <div class="file-row"><input type="file" id="imgFile" accept="image/*"></div>
+  <p class="hint">單一檔案請控制在 25 MB 以下,上傳完可以直接關掉這個頁面。</p>
+
+  <button id="submitBtn" onclick="uploadAll()">上傳</button>
+
+  <div id="status"></div>
+  <div id="tokenBox"></div>
+</div>
+
+<script>
+// ---- 講師設定區:只有這三行要改 ----
+const OWNER  = "chautsoiman-eng";           // 收檔 repo 所在的帳號
+const REPO   = "doll-workshop-submissions"; // 收檔用的 private repo 名稱
+const BRANCH = "main";                       // 學生檔案要進去的分支(不是這個網頁所在的分支)
+
+// 權杖(token)不寫在檔案裡,一律從連結網址的 #t=xxx 帶進來,
+// 這樣就算這個頁面本身是公開的,token 也不會被存進 git 紀錄或伺服器 log。
+function getToken() {
+  const hash = new URLSearchParams(location.hash.slice(1));
+  return hash.get("t") || sessionStorage.getItem("workshop_token") || "";
+}
+
+// 只給講師自己測試用:手動貼 token,只存在這個分頁的記憶體(sessionStorage),
+// 關掉分頁就消失,不會留在網址列或裝置上。
+function manualToken() {
+  const t = prompt("貼上測試用的 fine-grained token(github_pat_ 開頭):");
+  if (t) {
+    sessionStorage.setItem("workshop_token", t.trim());
+    document.getElementById("tokenBox").style.display = "none";
+  }
+}
+
+function sanitize(s) {
+  return s.trim().replace(/[\\/:*?"<>|#%]/g, "").replace(/\s+/g, "");
+}
+
+function toBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(",")[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function addRow(text, cls) {
+  const div = document.createElement("div");
+  div.className = "row " + cls;
+  div.textContent = text;
+  document.getElementById("status").appendChild(div);
+  return div;
+}
+
+async function putFile(token, path, base64Content, message) {
+  const url = `https://api.github.com/repos/${OWNER}/${REPO}/contents/${path.split("/").map(encodeURIComponent).join("/")}`;
+  const headers = {
+    "Authorization": "token " + token,
+    "Accept": "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+
+  // 先查有沒有同名舊檔(重傳/覆蓋用),查不到就當新檔案處理
+  let sha;
+  const getRes = await fetch(url + `?ref=${BRANCH}`, { headers });
+  if (getRes.ok) {
+    sha = (await getRes.json()).sha;
+  }
+
+  const body = { message, content: base64Content, branch: BRANCH };
+  if (sha) body.sha = sha;
+
+  const putRes = await fetch(url, {
+    method: "PUT",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (!putRes.ok) {
+    const err = await putRes.json().catch(() => ({}));
+    throw new Error(err.message || `HTTP ${putRes.status}`);
+  }
+}
+
+async function uploadAll() {
+  const token = getToken();
+  const btn = document.getElementById("submitBtn");
+  document.getElementById("status").innerHTML = "";
+  document.getElementById("tokenBox").style.display = "none";
+
+  if (!token) {
+    const box = document.getElementById("tokenBox");
+    box.style.display = "block";
+    box.innerHTML =
+      "找不到上傳權限(連結不完整)。請用課堂投影片上的 QR code 或講師提供的完整連結重新開啟這個頁面,不要自己輸入網址。" +
+      '<br><br><a href="#" onclick="manualToken();return false;" style="color:var(--red);">講師測試用:手動輸入 token</a>';
+    return;
+  }
+
+  const id = sanitize(document.getElementById("empId").value);
+  const name = sanitize(document.getElementById("empName").value);
+  const stl = document.getElementById("stlFile").files[0];
+  const img = document.getElementById("imgFile").files[0];
+
+  if (!id || !name) { addRow("請填工號跟姓名", "err"); return; }
+  if (!stl) { addRow("請選擇 STL 檔案", "err"); return; }
+
+  btn.disabled = true;
+  btn.textContent = "上傳中…";
+
+  const folder = `submissions/${id}_${name}`;
+  const jobs = [{ file: stl, name: `${id}_${name}_v1.stl` }];
+  if (img) {
+    const ext = (img.name.match(/\.[^.]+$/) || [".jpg"])[0];
+    jobs.push({ file: img, name: `${id}_${name}_ref${ext}` });
+  }
+
+  let allOk = true;
+  for (const job of jobs) {
+    const row = addRow(`上傳 ${job.name} 中…`, "busy");
+    try {
+      const b64 = await toBase64(job.file);
+      await putFile(token, `${folder}/${job.name}`, b64, `上傳 ${job.name}`);
+      row.textContent = `✓ ${job.name} 上傳成功`;
+      row.className = "row ok";
+    } catch (e) {
+      row.textContent = `✗ ${job.name} 失敗:${e.message}`;
+      row.className = "row err";
+      allOk = false;
+    }
+  }
+
+  btn.disabled = false;
+  btn.textContent = allOk ? "全部完成,可以再傳一次" : "重新上傳";
+}
+</script>
+</body>
+</html>
