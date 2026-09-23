@@ -58,7 +58,8 @@
 <body>
 <div class="card">
   <h1>2D 到 3D 公仔製作</h1>
-  <p class="sub">上傳你的 STL 檔案跟 2D 參考圖,選好檔案按「上傳」就好,不用登入、不用申請帳號。</p>
+  <p class="sub">選好檔案按「上傳」就好,不用登入、不用申請帳號。STL / 2D 圖 / 卡片 PDF
+    可以分開傳(例如卡片晚點做完再回來傳),工號姓名記得每次都填一樣的。</p>
 
   <label>工號</label>
   <input type="text" id="empId" placeholder="例如 A1234" autocomplete="off">
@@ -66,12 +67,15 @@
   <label>姓名</label>
   <input type="text" id="empName" placeholder="例如 陳小美" autocomplete="off">
 
-  <label>STL 檔案(必填)</label>
+  <label>STL 檔案</label>
   <div class="file-row"><input type="file" id="stlFile" accept=".stl"></div>
 
-  <label>2D 參考圖(建議附上)</label>
+  <label>2D 參考圖</label>
   <div class="file-row"><input type="file" id="imgFile" accept="image/*"></div>
-  <p class="hint">單一檔案請控制在 25 MB 以下,上傳完可以直接關掉這個頁面。</p>
+
+  <label>卡片 PDF(卡片工具匯出的)</label>
+  <div class="file-row"><input type="file" id="pdfFile" accept=".pdf"></div>
+  <p class="hint">三個至少選一個上傳就好。單一檔案請控制在 25 MB 以下,上傳完可以直接關掉這個頁面。</p>
 
   <button id="submitBtn" onclick="uploadAll()">上傳</button>
 
@@ -172,19 +176,22 @@ async function uploadAll() {
   const name = sanitize(document.getElementById("empName").value);
   const stl = document.getElementById("stlFile").files[0];
   const img = document.getElementById("imgFile").files[0];
+  const pdf = document.getElementById("pdfFile").files[0];
 
   if (!id || !name) { addRow("請填工號跟姓名", "err"); return; }
-  if (!stl) { addRow("請選擇 STL 檔案", "err"); return; }
+  if (!stl && !img && !pdf) { addRow("請至少選一個檔案(STL / 2D 圖 / 卡片 PDF)", "err"); return; }
 
   btn.disabled = true;
   btn.textContent = "上傳中…";
 
   const folder = `submissions/${id}_${name}`;
-  const jobs = [{ file: stl, name: `${id}_${name}_v1.stl` }];
+  const jobs = [];
+  if (stl) jobs.push({ file: stl, name: `${id}_${name}_v1.stl` });
   if (img) {
     const ext = (img.name.match(/\.[^.]+$/) || [".jpg"])[0];
     jobs.push({ file: img, name: `${id}_${name}_ref${ext}` });
   }
+  if (pdf) jobs.push({ file: pdf, name: `${id}_${name}_card.pdf` });
 
   let allOk = true;
   for (const job of jobs) {
