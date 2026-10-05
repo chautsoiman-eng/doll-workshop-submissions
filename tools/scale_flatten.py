@@ -47,10 +47,7 @@ def scale_to_height(mesh, h):
     return mesh
 
 
-def process(path):
-    mesh = trimesh.load(path, force="mesh")
-    report = {"file": path, "orig_extents": mesh.extents.round(3).tolist(),
-              "orig_watertight": bool(mesh.is_watertight)}
+def repair(mesh, report):
     if not mesh.is_watertight:
         # 丟掉孤立的雜點三角形；局部的非流形邊用 MeshFix 修；多個實體再聯集成一個
         bodies = [b for b in mesh.split(only_watertight=False) if len(b.faces) > 100]
@@ -62,7 +59,16 @@ def process(path):
                 bodies[i] = trimesh.Trimesh(v, f)
         mesh = bodies[0] if len(bodies) == 1 else trimesh.boolean.union(bodies, engine="manifold")
         report["repaired_watertight"] = bool(mesh.is_watertight)
-    scale_to_height(mesh, TARGET_H)
+    return mesh
+
+
+def process(path, target_h=TARGET_H, out=None, mesh=None):
+    if mesh is None:
+        mesh = trimesh.load(path, force="mesh")
+    report = {"file": path, "orig_extents": mesh.extents.round(3).tolist(),
+              "orig_watertight": bool(mesh.is_watertight)}
+    mesh = repair(mesh, report)
+    scale_to_height(mesh, target_h)
 
     depths = np.arange(STEP_MM, SCAN_MM + 1e-9, STEP_MM)
     areas, perims = np.array([section_area_perimeter(mesh, d) for d in depths]).T
@@ -79,7 +85,7 @@ def process(path):
         report["already_flat"] = False
         report["cut_mm"] = round(cut, 2)
         mesh = mesh.slice_plane(plane_origin=[0, 0, cut], plane_normal=[0, 0, 1], cap=True)
-        scale_to_height(mesh, TARGET_H)
+        scale_to_height(mesh, target_h)
 
     w, d, h = mesh.extents
     fit = min(1.0, LIMITS["width_x"] / w, LIMITS["depth_y"] / d, LIMITS["height_z"] / h)
@@ -94,9 +100,10 @@ def process(path):
     report["final_mm"] = {"width_x": round(w, 2), "depth_y": round(d, 2), "height_z": round(h, 2)}
     report["over_limit"] = [k for k, v in report["final_mm"].items() if v > LIMITS[k] + 1e-6]
 
-    h = mesh.extents[2]
-    suffix = "_10cm_flat.stl" if abs(h - TARGET_H) < 1e-6 else f"_{h:.0f}mm_flat.stl"
-    out = path[:-4] + suffix
+    if out is None:
+        h = mesh.extents[2]
+        suffix = "_10cm_flat.stl" if abs(h - TARGET_H) < 1e-6 else f"_{h:.0f}mm_flat.stl"
+        out = path[:-4] + suffix
     mesh.export(out)
     report["output"] = out
     return report
