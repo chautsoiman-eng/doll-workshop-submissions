@@ -3,8 +3,8 @@
   - 鏡框：背面（朝臉）整片沿鏡片法線往後拉出 FRAME mm；只拉鏡框圈，不拉鉸鏈/鏡腳根部
   - 鏡腳：內側（朝頭）整片沿左右方向往內拉出 TEMPLE mm
   - 鏡片：正面不動，背面往內拉 LENS mm，不超過鏡框背面、不碰到眼球
-用法（在 repo 根目錄）:  python tools/glasses/chen_T_5cm.py 0.4 0 0.5   # 鏡框 鏡腳 鏡片背面
-（學員確認：鏡腳內側拉出會壞，TEMPLE 用 0 = 鏡腳不動）
+用法（在 repo 根目錄）:  python tools/glasses/chen_T_5cm.py 0.4 0.3 0.5   # 鏡框 鏡腳 鏡片背面
+（鏡腳內側只拉離鏡框 1mm 以外、明確朝內的面）
 """
 import os
 import sys
@@ -16,13 +16,13 @@ from thicken_details import in_box
 from trimesh.ray.ray_pyembree import RayMeshIntersector
 FRAME, TEMPLE = float(sys.argv[1]), float(sys.argv[2])
 src='submissions/LA1900226_陳誼緁/LA1900226_陳誼緁_T_5cm_flat.stl'; dst=src[:-4]+'_thick.stl'
+from shapely.geometry import Point
 FS=[-0.14,-9.36,31.45]; LS=[[2.07,-10.3,31.81],[-4.16,-8.61,29.42]]; BOX=(-12,12,26,40)
 o=trimesh.load(src); frame,temple,Ls=parts(o,FS,LS,BOX)
 back=-np.mean([L['nrm'] for L in Ls],axis=0); back/=np.linalg.norm(back)
 head=o.vertices[o.vertices[:,2]>28].mean(0)
 # 鏡框背面：只取「真正的鏡框圈」—— 離鏡片邊緣 0.6mm 內、在鏡片平面後方 0.6mm 內的背面；
 # 鉸鏈、鏡腳根部比較後面，不要拉（拉了會在鏡框和鏡腳之間長出一塊斜面）。碰到臉沒關係，不限制。
-from shapely.geometry import Point
 fb=frame[o.face_normals[frame]@back>0.3]; fc=o.triangles_center[fb]
 rim=np.zeros(len(fb),bool)
 for L in Ls:
@@ -35,7 +35,14 @@ for side in (-1,1):
     tt=temple[np.sign(o.triangles_center[temple][:,0])==side]
     inward=np.array([-side,0,0.0]); dirs.append((tt,inward))
     if TEMPLE > 0:
-        solids.append(extrude_patch(o,tt[o.face_normals[tt]@inward>0.3],inward,TEMPLE))
+        # 只拉明確朝內的面（法線 · 內側 > 0.5），而且離鏡框 1mm 以上（不碰鉸鏈，避免長出斜面）
+        ti=tt[o.face_normals[tt]@inward>0.5]
+        far=np.ones(len(ti),bool)
+        for L in Ls:
+            q=o.triangles_center[ti]-L['o']
+            far&=np.array([L['poly'].exterior.distance(Point(p))>1.0 for p in np.c_[q@L['u'],q@L['v']]])
+        print(f'temple {side}: inner faces {len(ti)}  pulled {far.sum()}  skipped near hinge {np.sum(~far)}')
+        solids.append(extrude_patch(o,ti[far],inward,TEMPLE))
 out=o
 for s in solids: out=trimesh.boolean.union([out,s],engine='manifold')
 out=max(out.split(only_watertight=False),key=lambda b:len(b.faces))
