@@ -12,7 +12,6 @@
   5. 頂點數、面數、連接關係都不變，原本的平滑表面保留。
 """
 import numpy as np
-import trimesh
 from scipy.sparse import coo_matrix
 from scipy.spatial import cKDTree
 from scipy.sparse.csgraph import dijkstra

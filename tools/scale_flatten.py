@@ -17,7 +17,6 @@
 輸出: 同資料夾 <原檔名>_10cm_flat.stl；縮小過的為 <原檔名>_<高度>mm_flat.stl
 """
 import json
-import os
 import sys
 
 import numpy as np
