@@ -250,7 +250,8 @@ def run(name, cfg, png=None):
             for sd in part["seeds"]:
                 mesh, rep = plate_thicken(mesh, sd, center=part.get("plate_center", False),
                                          inward=part.get("plate_inward", False),
-                                         inset_mm=part.get("plate_inset", 0.12))
+                                         inset_mm=part.get("plate_inset", 0.12),
+                                         front_out=part.get("plate_front_out"), back_in=part.get("plate_back_in"))
                 pushes.append(rep["push_mm"])
             p["max_push_mm"] = max(pushes)
         else:
