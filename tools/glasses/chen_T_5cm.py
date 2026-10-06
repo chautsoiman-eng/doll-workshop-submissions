@@ -1,6 +1,6 @@
 """
 陳誼緁 T（5cm）的墨鏡加厚（學員確認的做法）：
-  - 鏡框：背面（朝臉）整片沿鏡片法線往後拉出 FRAME mm
+  - 鏡框：背面（朝臉）整片沿鏡片法線往後拉出 FRAME mm；只拉鏡框圈，不拉鉸鏈/鏡腳根部
   - 鏡腳：內側（朝頭）整片沿左右方向往內拉出 TEMPLE mm
   - 鏡片：正面不動，背面往內拉 LENS mm，不超過鏡框背面、不碰到眼球
 用法（在 repo 根目錄）:  python tools/glasses/chen_T_5cm.py 0.4 0 0.5   # 鏡框 鏡腳 鏡片背面
@@ -20,7 +20,17 @@ FS=[-0.14,-9.36,31.45]; LS=[[2.07,-10.3,31.81],[-4.16,-8.61,29.42]]; BOX=(-12,12
 o=trimesh.load(src); frame,temple,Ls=parts(o,FS,LS,BOX)
 back=-np.mean([L['nrm'] for L in Ls],axis=0); back/=np.linalg.norm(back)
 head=o.vertices[o.vertices[:,2]>28].mean(0)
-solids=[extrude_patch(o,frame[o.face_normals[frame]@back>0.3],back,FRAME)]; dirs=[]
+# 鏡框背面：只取「真正的鏡框圈」—— 離鏡片邊緣 0.6mm 內、在鏡片平面後方 0.6mm 內的背面；
+# 鉸鏈、鏡腳根部比較後面，不要拉（拉了會在鏡框和鏡腳之間長出一塊斜面）。碰到臉沒關係，不限制。
+from shapely.geometry import Point
+fb=frame[o.face_normals[frame]@back>0.3]; fc=o.triangles_center[fb]
+rim=np.zeros(len(fb),bool)
+for L in Ls:
+    q=fc-L['o']; xy=np.c_[q@L['u'],q@L['v']]
+    near=np.array([L['poly'].exterior.distance(Point(p))<0.6 for p in xy])
+    rim|=near&((q@L['nrm'])>-0.6)
+print(f'frame back faces {len(fb)}  rim {rim.sum()}  skipped (hinge/temple) {np.sum(~rim)}')
+solids=[extrude_patch(o,fb[rim],back,FRAME)]; dirs=[]
 for side in (-1,1):
     tt=temple[np.sign(o.triangles_center[temple][:,0])==side]
     inward=np.array([-side,0,0.0]); dirs.append((tt,inward))
