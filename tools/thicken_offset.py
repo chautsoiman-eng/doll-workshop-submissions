@@ -332,14 +332,15 @@ def refine_thin(mesh, box, seeds, ignore_below=0.0, min_mm=MIN_MM, max_edge=0.3,
 
 
 
-def plate_thicken(mesh, seed, min_mm=MIN_MM, plate_max=0.5, inset_mm=0.12, gap_mm=0.03):
+def plate_thicken(mesh, seed, min_mm=MIN_MM, plate_max=0.5, inset_mm=0.12, gap_mm=0.03, center=False):
     """「平板模式」：替換太薄的平板（例如貼在眼睛前面的墨鏡鏡片），表面保證平整。
 
     直接推頂點的話，粗網格的鏡片會被推得皺皺的，所以改成：
       1. 從 seed（點在鏡片「正面」）找出正面：連在一起、比 plate_max 薄、朝向差不多的面。
       2. 把正面投影到鏡片平面，得到鏡片輪廓，往內縮 inset_mm（讓鏡框露出來）。
-      3. 做一片厚 min_mm + MARGIN、兩面平整的新板子，背面貼在原本鏡片背面往前 gap_mm 的地方
-         （避免兩個面完全重疊），再跟模型布林聯集。原本的面都不動。
+      3. 做一片厚 min_mm + MARGIN、兩面平整的新板子，再跟模型布林聯集。原本的面都不動。
+         center=False：背面貼在原本鏡片背面往前 gap_mm 的地方（只往正面長）；
+         center=True ：以原本鏡片的中間為中心，兩面各往外長一半。
     回傳 (新 mesh, 報告)。
     """
     c = mesh.triangles_center
@@ -364,13 +365,20 @@ def plate_thicken(mesh, seed, min_mm=MIN_MM, plate_max=0.5, inset_mm=0.12, gap_m
     outline = outline.buffer(0.02).buffer(-0.02 - inset_mm)
     if outline.geom_type == "MultiPolygon":
         outline = max(outline.geoms, key=lambda q: q.area)
-    back = float(np.median((pts - o) @ nrm)) - tmed + gap_mm
     thick = min_mm + MARGIN
+    front = float(np.median((pts - o) @ nrm))
+    if center:
+        # 以原本鏡片的中間為中心，兩面各往外長一半
+        back = front - tmed / 2 - thick / 2
+    else:
+        # 背面貼齊原本的背面（往前 gap_mm），只往正面長
+        back = front - tmed + gap_mm
     plate = trimesh.creation.extrude_polygon(outline, thick)
     T = np.eye(4)
     T[:3, 0], T[:3, 1], T[:3, 2], T[:3, 3] = u, v, nrm, o + nrm * back
     plate.apply_transform(T)
     out = trimesh.boolean.union([mesh, plate], engine="manifold")
     report = {"plate_area_mm2": round(float(outline.area), 1), "thickness_before_mm": round(tmed, 2),
-              "push_mm": round(thick + gap_mm - tmed, 3), "watertight": bool(out.is_watertight)}
+              "push_mm": round((thick - tmed) / 2 if center else thick + gap_mm - tmed, 3),
+              "watertight": bool(out.is_watertight)}
     return out, report

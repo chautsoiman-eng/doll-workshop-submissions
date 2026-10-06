@@ -248,12 +248,12 @@ def run(name, cfg, png=None):
             # 平板模式：每個 seed 是一片板子要推的那一面（例如鏡片正面）
             pushes = []
             for sd in part["seeds"]:
-                mesh, rep = plate_thicken(mesh, sd)
+                mesh, rep = plate_thicken(mesh, sd, center=part.get("plate_center", False))
                 pushes.append(rep["push_mm"])
             p["max_push_mm"] = max(pushes)
         else:
             mesh, rep = offset_thicken(mesh, part["box"], part["seeds"], ignore_below=part.get("ignore_below", 0.0),
-                                       push_dir=part.get("push_dir"))
+                                       push_dir=part.get("push_dir"), uniform=part.get("uniform", False))
             p["max_push_mm"] = rep["max_push_mm"]
     dst = out_path(src)
     mesh.export(dst)
