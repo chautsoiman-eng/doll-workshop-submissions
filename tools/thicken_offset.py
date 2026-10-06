@@ -332,7 +332,7 @@ def refine_thin(mesh, box, seeds, ignore_below=0.0, min_mm=MIN_MM, max_edge=0.3,
 
 
 
-def plate_thicken(mesh, seed, min_mm=MIN_MM, plate_max=0.5, inset_mm=0.12, gap_mm=0.03, center=False):
+def plate_thicken(mesh, seed, min_mm=MIN_MM, plate_max=0.5, inset_mm=0.12, gap_mm=0.03, center=False, inward=False):
     """「平板模式」：替換太薄的平板（例如貼在眼睛前面的墨鏡鏡片），表面保證平整。
 
     直接推頂點的話，粗網格的鏡片會被推得皺皺的，所以改成：
@@ -341,6 +341,7 @@ def plate_thicken(mesh, seed, min_mm=MIN_MM, plate_max=0.5, inset_mm=0.12, gap_m
       3. 做一片厚 min_mm + MARGIN、兩面平整的新板子，再跟模型布林聯集。原本的面都不動。
          center=False：背面貼在原本鏡片背面往前 gap_mm 的地方（只往正面長）；
          center=True ：以原本鏡片的中間為中心，兩面各往外長一半。
+         inward=True ：正面不動，整片往內（背面方向）長，從正面看完全不變。
     回傳 (新 mesh, 報告)。
     """
     c = mesh.triangles_center
@@ -367,7 +368,10 @@ def plate_thicken(mesh, seed, min_mm=MIN_MM, plate_max=0.5, inset_mm=0.12, gap_m
         outline = max(outline.geoms, key=lambda q: q.area)
     thick = min_mm + MARGIN
     front = float(np.median((pts - o) @ nrm))
-    if center:
+    if inward:
+        # 正面不動，往內（背面方向）長：新板子的正面比原本正面往內 gap_mm
+        back = front - gap_mm - thick
+    elif center:
         # 以原本鏡片的中間為中心，兩面各往外長一半
         back = front - tmed / 2 - thick / 2
     else:
@@ -379,6 +383,6 @@ def plate_thicken(mesh, seed, min_mm=MIN_MM, plate_max=0.5, inset_mm=0.12, gap_m
     plate.apply_transform(T)
     out = trimesh.boolean.union([mesh, plate], engine="manifold")
     report = {"plate_area_mm2": round(float(outline.area), 1), "thickness_before_mm": round(tmed, 2),
-              "push_mm": round((thick - tmed) / 2 if center else thick + gap_mm - tmed, 3),
+              "push_mm": round((thick - tmed) / 2 if center else thick + gap_mm - tmed, 3), "inward": inward,
               "watertight": bool(out.is_watertight)}
     return out, report

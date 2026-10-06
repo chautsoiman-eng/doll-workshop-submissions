@@ -1,1 +1,9 @@
-{}
+{
+  "LA1900226_陳誼緁_T_5cm": {
+    "file": "submissions/LA1900226_陳誼緁/LA1900226_陳誼緁_T_5cm_flat.stl",
+    "parts": [
+      {"name": "T 的墨鏡鏡片（正面不動、往內長）", "box": [-12, 12, 26, 40], "plate": true, "plate_inward": true, "plate_inset": 0.0,
+       "seeds": [[2.07, -10.3, 31.81], [-4.16, -8.61, 29.42]]}
+    ]
+  }
+}
