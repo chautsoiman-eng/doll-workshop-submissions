@@ -2,7 +2,7 @@
 陳誼緁 T（5cm）的墨鏡加厚（學員確認的做法）：
   - 鏡框：背面（朝臉）整片沿鏡片法線往後拉出 FRAME mm
   - 鏡腳：內側（朝頭）整片沿左右方向往內拉出 TEMPLE mm
-  - 鏡片：正面 +0.2mm、背面 +0.3mm 的平整新鏡片（plate_thicken）
+  - 鏡片：正面整片往外拉 0.2mm、背面整片往內拉 0.3mm（保留原本彎度）
 用法（在 repo 根目錄）:  python tools/glasses/chen_T_5cm.py 0.4 0.45
 """
 import os
@@ -10,7 +10,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import numpy as np, trimesh, pymeshfix
 from extrude_faces import parts, extrude_patch
-from thicken_offset import plate_thicken, crossing_edges
+from thicken_offset import crossing_edges
 from thicken_details import in_box
 from trimesh.ray.ray_pyembree import RayMeshIntersector
 FRAME, TEMPLE = float(sys.argv[1]), float(sys.argv[2])
@@ -27,7 +27,17 @@ for side in (-1,1):
 out=o
 for s in solids: out=trimesh.boolean.union([out,s],engine='manifold')
 out=max(out.split(only_watertight=False),key=lambda b:len(b.faces))
-for sd in LS: out,_=plate_thicken(out,sd,inset_mm=0.0,front_out=0.2,back_in=0.3)
+# 鏡片：正面整片沿鏡片法線往外拉 0.2mm、背面整片往內拉 0.3mm（保留原本的彎度）
+from shapely.geometry import Point
+from extrude_faces import lens_info
+cc=o.triangles_center
+for sd in LS:
+    L=lens_info(o,sd); front=L['faces']
+    q=cc-L['o']; cand=np.where((np.abs(q@L['nrm'])<1.0)&(o.face_normals@L['nrm']<-0.7))[0]
+    xy=np.c_[q[cand]@L['u'],q[cand]@L['v']]; inner=L['poly'].buffer(-0.05)
+    back_f=cand[np.array([inner.contains(Point(p)) for p in xy])]
+    out=trimesh.boolean.union([out,extrude_patch(o,front,L['nrm'],0.2)],engine='manifold')
+    out=trimesh.boolean.union([out,extrude_patch(o,back_f,-L['nrm'],0.3)],engine='manifold')
 out=max(out.split(only_watertight=False),key=lambda b:len(b.faces)); out.export(dst); m=trimesh.load(dst)
 if not m.is_watertight:
     v,f=pymeshfix.clean_from_arrays(np.ascontiguousarray(m.vertices,dtype=np.float64),np.ascontiguousarray(m.faces,dtype=np.int32)); m=trimesh.Trimesh(v,f); m.export(dst); m=trimesh.load(dst)

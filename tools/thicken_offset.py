@@ -333,7 +333,7 @@ def refine_thin(mesh, box, seeds, ignore_below=0.0, min_mm=MIN_MM, max_edge=0.3,
 
 
 def plate_thicken(mesh, seed, min_mm=MIN_MM, plate_max=0.5, inset_mm=0.12, gap_mm=0.03, center=False, inward=False,
-                  front_out=None, back_in=None):
+                  front_out=None, back_in=None, detect_on=None):
     """「平板模式」：替換太薄的平板（例如貼在眼睛前面的墨鏡鏡片），表面保證平整。
 
     直接推頂點的話，粗網格的鏡片會被推得皺皺的，所以改成：
@@ -344,8 +344,11 @@ def plate_thicken(mesh, seed, min_mm=MIN_MM, plate_max=0.5, inset_mm=0.12, gap_m
          center=True ：以原本鏡片的中間為中心，兩面各往外長一半。
          inward=True ：正面不動，整片往內（背面方向）長，從正面看完全不變。
          front_out / back_in：直接指定正面往外、背面往內各加多少 mm（總厚度 = 原本 + 兩者）。
+      detect_on：在另一個模型（例如加厚前的原始模型）上找鏡片輪廓，避免被已加厚的鏡框干擾。
     回傳 (新 mesh, 報告)。
     """
+    target = mesh
+    mesh = detect_on if detect_on is not None else mesh   # 鏡片輪廓從這個模型上找（例如加厚前的原始模型）
     c = mesh.triangles_center
     d0 = np.linalg.norm(c - np.asarray(seed), axis=1)
     start = int(np.argmin(d0))
@@ -387,7 +390,7 @@ def plate_thicken(mesh, seed, min_mm=MIN_MM, plate_max=0.5, inset_mm=0.12, gap_m
     T = np.eye(4)
     T[:3, 0], T[:3, 1], T[:3, 2], T[:3, 3] = u, v, nrm, o + nrm * back
     plate.apply_transform(T)
-    out = trimesh.boolean.union([mesh, plate], engine="manifold")
+    out = trimesh.boolean.union([target, plate], engine="manifold")
     report = {"plate_area_mm2": round(float(outline.area), 1), "thickness_before_mm": round(tmed, 2),
               "push_mm": round(thick - tmed, 3), "new_thickness_mm": round(thick, 2),
               "watertight": bool(out.is_watertight)}
