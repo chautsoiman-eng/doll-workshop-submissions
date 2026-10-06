@@ -9,7 +9,11 @@
             {"name": "眼鏡",
              "box": [x0, x1, z0, z1],        # 這個部件大概所在的範圍（mm；正面看的左右 x、上下 z）
              "seeds": [[x, y, z], ...],      # 部件上的起點（從 inspect 的編號圖挑）
-             "ignore_below": 0.3}            # 比這個還薄的面不處理（例如模型本身的眼皮薄膜）
+             "ignore_below": 0.3,            # 比這個還薄的面不處理（例如模型本身的眼皮薄膜）
+             "push_dir": "auto",             # （選用）單面推："auto" 自動判斷，或給方向 [0, -1, 0]（例如墨鏡鏡片）
+             "refine": true,                 # （選用）先把很粗的薄三角形切細，讓中間有頂點可以推
+             "plate": true}                  # （選用）平板模式：seeds 點在鏡片「正面」；照原本輪廓做一片
+                                             #   0.9mm、兩面平整的新鏡片，背面貼齊原本的背面，再合併
         ]
     }
 
@@ -35,7 +39,7 @@ import trimesh
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from thicken import MIN_MM, connected_to_seeds, face_thickness, thin_faces  # noqa: E402
-from thicken_offset import crossing_edges, offset_thicken  # noqa: E402
+from thicken_offset import crossing_edges, offset_thicken, plate_thicken, refine_thin  # noqa: E402
 
 warnings.filterwarnings("ignore", message="Glyph")  # 圖上中文檔名缺字型，不影響結果
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -167,7 +171,13 @@ def render_pushed(png, mesh, ref, faces):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    dv = np.linalg.norm(mesh.vertices - ref.vertices, axis=1)
+    if len(mesh.vertices) == len(ref.vertices):
+        dv = np.linalg.norm(mesh.vertices - ref.vertices, axis=1)
+    else:  # 有切細過：量每個頂點離原始表面多遠
+        dv = np.zeros(len(mesh.vertices))
+        vs = np.unique(mesh.faces[faces])
+        _, dist, _ = trimesh.proximity.closest_point(ref, mesh.vertices[vs])
+        dv[vs] = dist
 
     def colors(f, sh):
         w = np.clip(dv[mesh.faces[f]].max(1) / 0.2, 0, 1)[:, None]
@@ -225,11 +235,26 @@ def run(name, cfg, png=None):
     src = os.path.join(ROOT, cfg["file"])
     orig = trimesh.load(src)
     mesh = orig
-    parts = []
+    parts = [{"part": p["name"], "before": part_stats(orig, p)} for p in cfg["parts"]]
+    # 先把需要的地方切細（例如很粗的鏡片網格），再一起加厚
+    added = 0
     for part in cfg["parts"]:
-        before = part_stats(mesh, part)
-        mesh, rep = offset_thicken(mesh, part["box"], part["seeds"], ignore_below=part.get("ignore_below", 0.0))
-        parts.append({"part": part["name"], "before": before, "max_push_mm": rep["max_push_mm"]})
+        if part.get("refine"):
+            mesh, n = refine_thin(mesh, part["box"], part["seeds"], ignore_below=part.get("ignore_below", 0.0))
+            added += n
+    base = mesh
+    for p, part in zip(parts, cfg["parts"]):
+        if part.get("plate"):
+            # 平板模式：每個 seed 是一片板子要推的那一面（例如鏡片正面）
+            pushes = []
+            for sd in part["seeds"]:
+                mesh, rep = plate_thicken(mesh, sd)
+                pushes.append(rep["push_mm"])
+            p["max_push_mm"] = max(pushes)
+        else:
+            mesh, rep = offset_thicken(mesh, part["box"], part["seeds"], ignore_below=part.get("ignore_below", 0.0),
+                                       push_dir=part.get("push_dir"))
+            p["max_push_mm"] = rep["max_push_mm"]
     dst = out_path(src)
     mesh.export(dst)
     saved = trimesh.load(dst)
@@ -243,12 +268,12 @@ def run(name, cfg, png=None):
         "crossing_edges": crossing_edges(saved, region),
         "watertight": bool(saved.is_watertight),
         "bodies": len(saved.split(only_watertight=False)),
-        "faces_unchanged": len(saved.faces) == len(orig.faces),
+        "faces_added": len(saved.faces) - len(orig.faces),
         "extents_mm": np.round(saved.extents, 2).tolist(),
     }
     print(json.dumps(result, ensure_ascii=False))
     if png:
-        render_pushed(png, saved, orig, region)
+        render_pushed(png, saved, base, region)
     return result
 
 
