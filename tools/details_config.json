@@ -1,16 +1,1 @@
-{
-  "LA1900226_陳誼緁_stack_TDG": {
-    "file": "submissions/LA1900226_陳誼緁/LA1900226_陳誼緁_stack_TDG_10cm_flat.stl",
-    "parts": [
-      {"name": "T 的墨鏡鏡片（正面）", "box": [-9, 9, 18, 29.5], "plate": true,
-       "seeds": [[2.25, -11.19, 23.07], [-2.44, -9.95, 21.44]]}
-    ]
-  },
-  "LA1900226_陳誼緁_stack2_DT-G": {
-    "file": "submissions/LA1900226_陳誼緁/LA1900226_陳誼緁_stack2_DT-G_10cm_flat.stl",
-    "parts": [
-      {"name": "T 的墨鏡鏡片（正面）", "box": [1, 31, 28, 45], "plate": true,
-       "seeds": [[16.31, -17.62, 36.39], [10.0, -15.78, 33.61]]}
-    ]
-  }
-}
+{}
