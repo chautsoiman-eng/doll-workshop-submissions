@@ -2,8 +2,9 @@
 陳誼緁 T（5cm）的墨鏡加厚（學員確認的做法）：
   - 鏡框：背面（朝臉）整片沿鏡片法線往後拉出 FRAME mm
   - 鏡腳：內側（朝頭）整片沿左右方向往內拉出 TEMPLE mm
-  - 鏡片：正面整片往外拉 0.2mm、背面整片往內拉 0.3mm（保留原本彎度）
-用法（在 repo 根目錄）:  python tools/glasses/chen_T_5cm.py 0.4 0.45
+  - 鏡片：正面不動，背面往內拉 LENS mm，不超過鏡框背面、不碰到眼球
+用法（在 repo 根目錄）:  python tools/glasses/chen_T_5cm.py 0.4 0 0.5   # 鏡框 鏡腳 鏡片背面
+（學員確認：鏡腳內側拉出會壞，TEMPLE 用 0 = 鏡腳不動）
 """
 import os
 import sys
@@ -23,21 +24,26 @@ solids=[extrude_patch(o,frame[o.face_normals[frame]@back>0.3],back,FRAME)]; dirs
 for side in (-1,1):
     tt=temple[np.sign(o.triangles_center[temple][:,0])==side]
     inward=np.array([-side,0,0.0]); dirs.append((tt,inward))
-    solids.append(extrude_patch(o,tt[o.face_normals[tt]@inward>0.3],inward,TEMPLE))
+    if TEMPLE > 0:
+        solids.append(extrude_patch(o,tt[o.face_normals[tt]@inward>0.3],inward,TEMPLE))
 out=o
 for s in solids: out=trimesh.boolean.union([out,s],engine='manifold')
 out=max(out.split(only_watertight=False),key=lambda b:len(b.faces))
-# 鏡片：正面整片沿鏡片法線往外拉 0.2mm、背面整片往內拉 0.3mm（保留原本的彎度）
+# 鏡片：正面不動，只把背面往內拉 LENS mm；不超過鏡框背面，離眼球近的地方停在眼球前 0.05mm
 from shapely.geometry import Point
-from extrude_faces import lens_info
+from extrude_faces import lens_info, free_space
+LENS = float(sys.argv[3]) if len(sys.argv) > 3 else 0.0
 cc=o.triangles_center
-for sd in LS:
-    L=lens_info(o,sd); front=L['faces']
-    q=cc-L['o']; cand=np.where((np.abs(q@L['nrm'])<1.0)&(o.face_normals@L['nrm']<-0.7))[0]
-    xy=np.c_[q[cand]@L['u'],q[cand]@L['v']]; inner=L['poly'].buffer(-0.05)
-    back_f=cand[np.array([inner.contains(Point(p)) for p in xy])]
-    out=trimesh.boolean.union([out,extrude_patch(o,front,L['nrm'],0.2)],engine='manifold')
-    out=trimesh.boolean.union([out,extrude_patch(o,back_f,-L['nrm'],0.3)],engine='manifold')
+for sd in (LS if LENS > 0 else []):
+    L=lens_info(o,sd); q=cc-L['o']; nrm=L['nrm']
+    cand=np.where((np.abs(q@nrm)<1.0)&(o.face_normals@nrm<-0.7))[0]
+    inner=L['poly'].buffer(-0.05)
+    bf=cand[np.array([inner.contains(Point(p)) for p in np.c_[q[cand]@L['u'],q[cand]@L['v']]])]
+    gap=free_space(o,bf,-nrm)
+    dist=np.clip(np.minimum(LENS,gap-0.05),0.0,None)
+    bf,dist=bf[dist>0.01],dist[dist>0.01]
+    out=trimesh.boolean.union([out,extrude_patch(o,bf,-nrm,dist)],engine='manifold')
+    print(f'lens back pull: faces {len(bf)}  full {np.mean(dist>=LENS-1e-6)*100:.0f}%  min {dist.min():.2f}')
 out=max(out.split(only_watertight=False),key=lambda b:len(b.faces)); out.export(dst); m=trimesh.load(dst)
 if not m.is_watertight:
     v,f=pymeshfix.clean_from_arrays(np.ascontiguousarray(m.vertices,dtype=np.float64),np.ascontiguousarray(m.faces,dtype=np.int32)); m=trimesh.Trimesh(v,f); m.export(dst); m=trimesh.load(dst)

@@ -61,6 +61,7 @@ def extrude_patch(m, faces, direction, dist, start=0.02):
     彎曲的面整片擠出時會自己交叉，逐個三角形做就不會。"""
     d=np.asarray(direction,float); d/=np.linalg.norm(d)
     T=m.triangles[faces]
+    dist=np.broadcast_to(np.asarray(dist,float),(len(faces),))[:,None,None]   # 可以每個面不同距離
     lo=T-d*start; hi=T+d*dist
     V=np.concatenate([lo,hi],axis=1).reshape(-1,3)          # 每個柱體 6 個點
     pf=np.array([[0,2,1],[3,4,5],[0,1,4],[0,4,3],[1,2,5],[1,5,4],[2,0,3],[2,3,5]])
