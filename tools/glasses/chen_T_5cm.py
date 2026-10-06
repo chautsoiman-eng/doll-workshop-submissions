@@ -4,7 +4,7 @@
   - 鏡腳：內側（朝頭）整片沿左右方向往內拉出 TEMPLE mm
   - 鏡片：正面不動，背面往內拉 LENS mm，不超過鏡框背面、不碰到眼球
 用法（在 repo 根目錄）:  python tools/glasses/chen_T_5cm.py 0.4 0.3 0.5   # 鏡框 鏡腳 鏡片背面
-（鏡腳內側只拉離鏡框 1mm 以外、明確朝內的面）
+（鏡腳是整根桿子往內掃，不只拉一部分）
 """
 import os
 import sys
@@ -33,16 +33,20 @@ print(f'frame back faces {len(fb)}  rim {rim.sum()}  skipped (hinge/temple) {np.
 solids=[extrude_patch(o,fb[rim],back,FRAME)]; dirs=[]
 for side in (-1,1):
     tt=temple[np.sign(o.triangles_center[temple][:,0])==side]
-    inward=np.array([-side,0,0.0]); dirs.append((tt,inward))
+    inward=np.array([-side,0,0.0])
     if TEMPLE > 0:
-        # 只拉明確朝內的面（法線 · 內側 > 0.5），而且離鏡框 1mm 以上（不碰鉸鏈，避免長出斜面）
-        ti=tt[o.face_normals[tt]@inward>0.5]
-        far=np.ones(len(ti),bool)
-        for L in Ls:
-            q=o.triangles_center[ti]-L['o']
-            far&=np.array([L['poly'].exterior.distance(Point(p))>1.0 for p in np.c_[q@L['u'],q@L['v']]])
-        print(f'temple {side}: inner faces {len(ti)}  pulled {far.sum()}  skipped near hinge {np.sum(~far)}')
-        solids.append(extrude_patch(o,ti[far],inward,TEMPLE))
+        # 整支鏡腳（整根桿子）沿左右方向往內掃過 TEMPLE mm：每個面都擠出小柱體再聯集，
+        # 等於整個內側面平移出去，上下兩邊的牆剛好沿著鏡腳的輪廓，從上面看不會有鋸齒。
+        # 只取鏡腳桿子本身（離桿子中心線 0.6mm 內），不含鉸鏈和末端黏在一起的頭髮。
+        p=o.triangles_center[tt]
+        core=p[(np.abs(p[:,0])>4)&((p[:,1]>-11)&(p[:,1]<-8) if side>0 else (p[:,1]>-7)&(p[:,1]<-3))]
+        mu=core.mean(0); ax=np.linalg.svd(core-mu)[2][0]
+        q=p-mu; r=np.linalg.norm(q-np.outer(q@ax,ax),axis=1)
+        bar=tt[(r<0.6)&(np.abs(p[:,0])>4)]
+        # 掃過的體積 = 原本 + 「朝內那半邊」每個面擠出的柱體
+        bar_all=bar; bar=bar[o.face_normals[bar]@inward>0.15]   # 太貼近側面的柱體太扁，存檔時會壞
+        print(f'temple {side}: faces {len(tt)}  inner half of bar {len(bar)}')
+        solids.append(extrude_patch(o,bar,inward,TEMPLE)); dirs.append((bar_all,inward))
 out=o
 for s in solids: out=trimesh.boolean.union([out,s],engine='manifold')
 out=max(out.split(only_watertight=False),key=lambda b:len(b.faces))
@@ -61,7 +65,12 @@ for sd in (LS if LENS > 0 else []):
     bf,dist=bf[dist>0.01],dist[dist>0.01]
     out=trimesh.boolean.union([out,extrude_patch(o,bf,-nrm,dist)],engine='manifold')
     print(f'lens back pull: faces {len(bf)}  full {np.mean(dist>=LENS-1e-6)*100:.0f}%  min {dist.min():.2f}')
-out=max(out.split(only_watertight=False),key=lambda b:len(b.faces)); out.export(dst); m=trimesh.load(dst)
+out=max(out.split(only_watertight=False),key=lambda b:len(b.faces))
+# 布林聯集會留下極小的碎邊，STL 存成 float32 時會黏在一起變破洞 → 先用 manifold 把 < 0.002mm 的邊合併掉
+import manifold3d
+mf=manifold3d.Manifold(manifold3d.Mesh(vert_properties=np.asarray(out.vertices,np.float32),tri_verts=np.asarray(out.faces,np.uint32))).simplify(0.002).to_mesh()
+out=trimesh.Trimesh(mf.vert_properties[:,:3],mf.tri_verts); out.export(dst); m=trimesh.load(dst)
+print('saved watertight', m.is_watertight)
 if not m.is_watertight:
     v,f=pymeshfix.clean_from_arrays(np.ascontiguousarray(m.vertices,dtype=np.float64),np.ascontiguousarray(m.faces,dtype=np.int32)); m=trimesh.Trimesh(v,f); m.export(dst); m=trimesh.load(dst)
 def depth(mm,pts,d):
