@@ -1,41 +1,44 @@
 """
-林羽倫：劍身前後兩面整片沿劍身的垂直方向往外拉，刀刃從 0.1～0.2mm 變成約 1mm，從正面看輪廓不變。
-靠近護手（劍格）那 5mm 拉出量漸變到 0，接到護手的地方不會有段差。
-做法是直接移動頂點（不用布林聯集），面數不變，不會產生碎面。
-用法（在 repo 根目錄）:  python tools/details/lin_sword.py 0.5      # 每一面拉出 mm
+林羽倫：劍身只放大「厚度方向」的比例（長度、寬度不變），刀刃一樣是尖的，形狀只是等比例變厚。
+靠近護手的 5mm 內，倍率漸變回 1，接到護手的地方不會有段差。
+做法是直接移動頂點，面數不變。
+用法（在 repo 根目錄）:  python tools/details/lin_sword.py 1.5      # 厚度倍率
 """
 import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import numpy as np, trimesh
 from thicken_offset import crossing_edges
-from thicken import face_thickness
-D = float(sys.argv[1]) if len(sys.argv) > 1 else 0.5
+K = float(sys.argv[1]) if len(sys.argv) > 1 else 1.5
 src = 'submissions/LA1900936_林羽倫/LA1900936_林羽倫_v1_10cm_flat.stl'; dst = src[:-4] + '_thick.stl'
 o = trimesh.load(src)
-# 劍身座標：MU 中心、L 沿劍身（往護手）、W 寬度方向、N 劍面的法線（量自原始模型）
-MU = np.array([-29.27, -15.66, 72.06])
+# 劍身座標：MU 中心、L 沿劍身（往護手）、W 寬度方向、N 劍面的法線
 c = o.triangles_center
 s = np.where((c[:, 0] < -24) & (c[:, 2] > 57) & (c[:, 1] < -10))[0]
-p = c[s] - c[s].mean(0); L, W, N = np.linalg.svd(p, full_matrices=False)[2]
+MU = c[s].mean(0); L, W, N = np.linalg.svd(c[s] - MU, full_matrices=False)[2]
 if L[2] > 0: L = -L
-MU = c[s].mean(0)
-q = c - MU; a, w, n = q @ L, q @ W, q @ N
-# 直接移動頂點：劍面這一側的頂點沿 +N 移 D、另一側沿 -N 移 D（整片平移，不用布林聯集，面數不變）。
-# 刀刃上的三角形會被拉開，變成一條約 2D 寬的平整側面。
 v = o.vertices - MU; va, vw, vn = v @ L, v @ W, v @ N
-vnorm = o.vertex_normals @ N
 sel = (va > -17.5) & (va < 18) & (np.abs(vw) < 3.8) & (np.abs(vn) < 0.95)
-side = np.where(np.abs(vn) > 0.02, np.sign(vn), np.sign(vnorm))
-ramp = np.clip((17 - va) / 5, 0, 1)                    # 護手上方 5mm 內漸變到 0（劍身中心往護手方向 17mm 之後完全不動）
+# 每一段劍身的中心面（厚度方向的中點），沿長度平滑
+bins = np.arange(-17.5, 18.5, 1.0); mid = []
+for b0 in bins:
+    k = sel & (va >= b0) & (va < b0 + 1)
+    mid.append((vn[k].max() + vn[k].min()) / 2 if k.any() else 0)
+center = np.interp(va, bins + 0.5, mid)
+ramp = np.clip((17 - va) / 5, 0, 1)                    # 護手上方 5mm 內倍率漸變回 1
+k = 1 + (K - 1) * ramp
 V = o.vertices.copy()
-V[sel] += (side[sel] * D * ramp[sel])[:, None] * N
-m = trimesh.Trimesh(V, o.faces, process=False)
-print(f'moved vertices {sel.sum()}')
-m.export(dst); m = trimesh.load(dst)
-for tag, mm in (('before', o), ('after', m)):
-    cc = mm.triangles_center - MU; aa = cc @ L
-    f = np.where((aa > -16) & (aa < 15) & (np.abs(cc @ W) < 3.7) & (np.abs(cc @ N) < 1.6))[0]
-    t = face_thickness(mm, f)
-    print(f'{tag}: blade thickness p1 {np.nanpercentile(t[np.isfinite(t)], 1):.2f}  area < 0.8mm {mm.area_faces[f][np.isfinite(t) & (t < 0.8)].sum():.1f} mm2  area < 1.0mm {mm.area_faces[f][np.isfinite(t) & (t < 1.0)].sum():.1f} mm2')
-print('crossing edges near blade: before', crossing_edges(o, np.where(np.linalg.norm(o.triangles_center - MU, axis=1) < 25)[0]), 'after', crossing_edges(m, np.where(np.linalg.norm(m.triangles_center - MU, axis=1) < 25)[0]))
+V[sel] += (((vn - center) * (k - 1))[sel])[:, None] * N
+m = trimesh.Trimesh(V, o.faces, process=False); m.export(dst); m = trimesh.load(dst)
+print(f'scale thickness x{K}: moved vertices {sel.sum()}')
+for t in (-14, -12, -8, -4, 0, 4, 8, 12, 15):
+    row = []
+    for mm in (o, m):
+        P = np.vstack(mm.section(L, MU + L * t).discrete) - MU; pw, pn = P @ W, P @ N
+        b = (np.abs(pw) < 4) & (np.abs(pn) < 2); pw, pn = pw[b], pn[b]
+        if mm is o: wid = pw.max() - pw.min(); cen = (pw.max() + pw.min()) / 2
+        q = np.abs(pw - cen) < 0.3; row.append(pn[q].max() - pn[q].min())
+        wl = pw.max() - pw.min()
+    print(f'{t:+3d}mm: width {wid:.2f} -> {wl:.2f}  center thickness {row[0]:.2f} -> {row[1]:.2f}')
+near = lambda mm: np.where(np.linalg.norm(mm.triangles_center - MU, axis=1) < 25)[0]
+print('crossing edges near blade: before', crossing_edges(o, near(o)), 'after', crossing_edges(m, near(m)))
 print('wt', m.is_watertight, 'bodies', len(m.split(only_watertight=False)), 'faces', len(o.faces), '->', len(m.faces))
