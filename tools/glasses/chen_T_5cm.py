@@ -3,7 +3,7 @@
   - 鏡框：背面（朝臉）整片沿鏡片法線往後拉出 FRAME mm；只拉鏡框圈，不拉鉸鏈/鏡腳根部
   - 鏡腳：內側（朝頭）整片沿左右方向往內拉出 TEMPLE mm
   - 鏡片：正面不動，背面往內拉 LENS mm，不超過鏡框背面、不碰到眼球
-用法（在 repo 根目錄）:  python tools/glasses/chen_T_5cm.py 0.4 0.3 0.5   # 鏡框 鏡腳 鏡片背面
+用法（在 repo 根目錄）:  python tools/glasses/chen_T_5cm.py 0.4 0 0.5   # 鏡框 鏡腳 鏡片背面（學員最後決定鏡腳不動 → 0）
 （鏡腳是整根桿子往內掃，不只拉一部分）
 """
 import os
